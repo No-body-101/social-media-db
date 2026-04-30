@@ -3,25 +3,29 @@ session_start();
 require 'db.php';
 if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
 $me = $_SESSION['user_id'];
-
+ 
 // Handle new post submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
     $content    = trim($_POST['content']);
     $visibility = $_POST['visibility'] ?? 'public';
     $media_url  = '';
-
-    if (!empty($_FILES['media']['name'])) {
-        $ext      = pathinfo($_FILES['media']['name'], PATHINFO_EXTENSION);
-        $allowed  = ['jpg','jpeg','png','gif','webp'];
-        if (in_array(strtolower($ext), $allowed)) {
-            $filename  = uniqid('img_') . '.' . $ext;
-            $uploadDir = 'uploads/';
+ 
+    if (!empty($_FILES['media']['name']) && $_FILES['media']['error'] === UPLOAD_ERR_OK) {
+        $ext     = strtolower(pathinfo($_FILES['media']['name'], PATHINFO_EXTENSION));
+        $allowed = ['jpg','jpeg','png','gif','webp','mp4','webm'];
+        $maxSize = 50 * 1024 * 1024; // 50MB
+ 
+        if (in_array($ext, $allowed) && $_FILES['media']['size'] <= $maxSize) {
+            $prefix    = in_array($ext, ['mp4','webm']) ? 'vid_' : 'img_';
+            $filename  = uniqid($prefix) . '.' . $ext;
+            $uploadDir = __DIR__ . '/uploads/';
             if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-            move_uploaded_file($_FILES['media']['tmp_name'], $uploadDir . $filename);
-            $media_url = $uploadDir . $filename;
+            if (move_uploaded_file($_FILES['media']['tmp_name'], $uploadDir . $filename)) {
+                $media_url = 'uploads/' . $filename;
+            }
         }
     }
-
+ 
     if ($content) {
         $stmt = $conn->prepare("INSERT INTO posts (user_id, content, visibility, media_url) VALUES (?, ?, ?, ?)");
         $stmt->bind_param("isss", $me, $content, $visibility, $media_url);
@@ -31,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
     header("Location: index.php");
     exit;
 }
-
+ 
 // Fetch posts from followed users + own posts
 $sql = "
     SELECT p.post_id, p.content, p.media_url, p.visibility, p.created_at,
@@ -53,8 +57,8 @@ $stmt->bind_param("iiii", $me, $me, $me, $me);
 $stmt->execute();
 $posts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
-
-// Suggested users (not followed, not self)
+ 
+// Suggested users
 $sugg_sql = "
     SELECT u.user_id, u.username
     FROM user u
@@ -80,18 +84,25 @@ $stmt->close();
 </head>
 <body>
 <?php include 'includes/nav.php'; ?>
-
+ 
 <div class="feed-layout">
-  <!-- MAIN FEED -->
   <main>
     <!-- Create Post -->
     <div class="create-post">
       <form method="POST" enctype="multipart/form-data">
         <textarea name="content" placeholder="What's on your mind, <?= htmlspecialchars($_SESSION['username']) ?>?" required></textarea>
+ 
+        <div id="mediaPreview" style="display:none;margin:0.6rem 0;">
+          <img id="previewImg" src="" style="max-width:100%;max-height:200px;border-radius:9px;object-fit:cover;" alt="Preview">
+          <video id="previewVid" src="" controls style="max-width:100%;max-height:200px;border-radius:9px;display:none;"></video>
+          <div id="fileName" style="font-size:0.8rem;color:var(--muted);margin-top:0.3rem;"></div>
+        </div>
+ 
         <div class="create-post-actions">
-          <label>
-            📷 <input type="file" name="media" accept="image/*" style="display:none;" onchange="this.parentElement.textContent='📷 ' + this.files[0].name">
+          <label for="mediaInput" style="cursor:pointer;color:var(--muted);font-size:0.88rem;padding:0.35rem 0.7rem;border-radius:8px;border:1px solid var(--border);background:var(--surface2);">
+            📷 Photo / Video
           </label>
+          <input type="file" id="mediaInput" name="media" accept="image/*,video/mp4,video/webm" style="display:none;" onchange="previewMedia(this)">
           <select name="visibility" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.4rem 0.7rem;font-family:inherit;font-size:0.85rem;outline:none;">
             <option value="public">🌐 Public</option>
             <option value="private">🔒 Private</option>
@@ -100,7 +111,7 @@ $stmt->close();
         </div>
       </form>
     </div>
-
+ 
     <!-- Posts -->
     <?php if (empty($posts)): ?>
       <div class="empty">
@@ -112,9 +123,7 @@ $stmt->close();
       <?php foreach ($posts as $p): ?>
       <div class="post-card">
         <div class="post-header">
-          <a href="profile.php?id=<?= $p['user_id'] ?>" class="avatar">
-            <?= strtoupper(substr($p['username'], 0, 1)) ?>
-          </a>
+          <a href="profile.php?id=<?= $p['user_id'] ?>" class="avatar"><?= strtoupper(substr($p['username'], 0, 1)) ?></a>
           <div class="post-meta">
             <a href="profile.php?id=<?= $p['user_id'] ?>" class="username"><?= htmlspecialchars($p['username']) ?></a>
             <div class="time"><?= date('M j, Y · g:i a', strtotime($p['created_at'])) ?>
@@ -130,15 +139,21 @@ $stmt->close();
             </form>
           <?php endif; ?>
         </div>
-
+ 
         <div class="post-content"><?= nl2br(htmlspecialchars($p['content'])) ?></div>
-
+ 
         <?php if ($p['media_url']): ?>
-          <img src="<?= htmlspecialchars($p['media_url']) ?>" class="post-image" alt="Post image">
+          <?php $ext = strtolower(pathinfo($p['media_url'], PATHINFO_EXTENSION)); ?>
+          <?php if (in_array($ext, ['mp4','webm'])): ?>
+            <video controls class="post-image" style="background:#000;">
+              <source src="<?= htmlspecialchars($p['media_url']) ?>" type="video/<?= $ext ?>">
+            </video>
+          <?php else: ?>
+            <img src="<?= htmlspecialchars($p['media_url']) ?>" class="post-image" alt="Post image">
+          <?php endif; ?>
         <?php endif; ?>
-
+ 
         <div class="post-actions">
-          <!-- Like -->
           <form method="POST" action="like.php" style="margin:0;">
             <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
             <input type="hidden" name="redirect" value="index.php">
@@ -147,14 +162,12 @@ $stmt->close();
               <?= $p['like_count'] ?> Likes
             </button>
           </form>
-          <!-- Comment toggle -->
           <button class="action-btn" onclick="toggleComments(<?= $p['post_id'] ?>)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
             <?= $p['comment_count'] ?> Comments
           </button>
         </div>
-
-        <!-- Comments Section -->
+ 
         <div class="comments-section" id="comments-<?= $p['post_id'] ?>" style="display:none;">
           <?php
             $cstmt = $conn->prepare("SELECT c.content, c.created_at, u.username, u.user_id FROM comments c JOIN user u ON c.user_id = u.user_id WHERE c.post_id = ? ORDER BY c.created_at ASC LIMIT 20");
@@ -172,7 +185,6 @@ $stmt->close();
             </div>
           </div>
           <?php endforeach; ?>
-
           <form method="POST" action="comment.php" class="comment-form">
             <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
             <input type="hidden" name="redirect" value="index.php">
@@ -184,10 +196,9 @@ $stmt->close();
       <?php endforeach; ?>
     <?php endif; ?>
   </main>
-
+ 
   <!-- SIDEBAR -->
   <aside class="sidebar">
-    <!-- My profile mini -->
     <div class="sidebar-card">
       <div style="display:flex;align-items:center;gap:0.8rem;">
         <a href="profile.php?id=<?= $me ?>" class="avatar"><?= strtoupper(substr($_SESSION['username'],0,1)) ?></a>
@@ -197,8 +208,7 @@ $stmt->close();
         </div>
       </div>
     </div>
-
-    <!-- Suggested users -->
+ 
     <?php if (!empty($suggestions)): ?>
     <div class="sidebar-card">
       <h3>People to follow</h3>
@@ -219,11 +229,34 @@ $stmt->close();
     <?php endif; ?>
   </aside>
 </div>
-
+ 
 <script>
 function toggleComments(postId) {
   const el = document.getElementById('comments-' + postId);
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+ 
+function previewMedia(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const preview = document.getElementById('mediaPreview');
+  const img     = document.getElementById('previewImg');
+  const vid     = document.getElementById('previewVid');
+  const nameDiv = document.getElementById('fileName');
+  const url     = URL.createObjectURL(file);
+ 
+  preview.style.display = 'block';
+  nameDiv.textContent   = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+ 
+  if (file.type.startsWith('video/')) {
+    img.style.display = 'none';
+    vid.style.display = 'block';
+    vid.src = url;
+  } else {
+    vid.style.display = 'none';
+    img.style.display = 'block';
+    img.src = url;
+  }
 }
 </script>
 </body>
