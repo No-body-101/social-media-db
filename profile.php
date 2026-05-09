@@ -7,7 +7,7 @@ $me = $_SESSION['user_id'];
 $profile_id = intval($_GET['id'] ?? $me);
 
 // Fetch user
-$stmt = $conn->prepare("SELECT user_id, username, email, bio, status, created_at FROM user WHERE user_id = ? AND is_deleted = FALSE");
+$stmt = $conn->prepare("SELECT user_id, username, email, bio, status, created_at, profile_pic, banner_pic FROM user WHERE user_id = ? AND is_deleted = FALSE");
 $stmt->bind_param("i", $profile_id);
 $stmt->execute();
 $user = $stmt->get_result()->fetch_assoc();
@@ -31,19 +31,63 @@ $stmt->bind_param("i", $profile_id);
 $stmt->execute();
 $stmt->bind_result($followers_count); $stmt->fetch(); $stmt->close();
 
-// Am I following?
 $stmt = $conn->prepare("SELECT COUNT(*) FROM follows WHERE follower_id = ? AND following_id = ?");
 $stmt->bind_param("ii", $me, $profile_id);
 $stmt->execute();
 $stmt->bind_result($is_following); $stmt->fetch(); $stmt->close();
 
-// Handle bio update
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bio']) && $profile_id == $me) {
-    $bio = trim($_POST['bio']);
-    $stmt = $conn->prepare("UPDATE user SET bio = ? WHERE user_id = ?");
-    $stmt->bind_param("si", $bio, $me);
-    $stmt->execute();
-    $stmt->close();
+// Helper: upload image
+function uploadImage($fileKey, $prefix) {
+    if (empty($_FILES[$fileKey]['name']) || $_FILES[$fileKey]['error'] !== UPLOAD_ERR_OK) return null;
+    $ext     = strtolower(pathinfo($_FILES[$fileKey]['name'], PATHINFO_EXTENSION));
+    $allowed = ['jpg','jpeg','png','gif','webp'];
+    if (!in_array($ext, $allowed)) return null;
+    if ($_FILES[$fileKey]['size'] > 10 * 1024 * 1024) return null;
+    $filename  = uniqid($prefix) . '.' . $ext;
+    $uploadDir = __DIR__ . '/uploads/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+    if (move_uploaded_file($_FILES[$fileKey]['tmp_name'], $uploadDir . $filename)) {
+        return 'uploads/' . $filename;
+    }
+    return null;
+}
+
+// Handle profile update
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $profile_id == $me) {
+    $fields = [];
+    $params = [];
+    $types  = '';
+
+    if (isset($_POST['bio'])) {
+        $fields[] = "bio = ?";
+        $params[] = trim($_POST['bio']);
+        $types   .= 's';
+    }
+
+    $new_pfp = uploadImage('profile_pic', 'pfp_');
+    if ($new_pfp) {
+        $fields[] = "profile_pic = ?";
+        $params[] = $new_pfp;
+        $types   .= 's';
+    }
+
+    $new_banner = uploadImage('banner_pic', 'banner_');
+    if ($new_banner) {
+        $fields[] = "banner_pic = ?";
+        $params[] = $new_banner;
+        $types   .= 's';
+    }
+
+    if (!empty($fields)) {
+        $params[] = $me;
+        $types   .= 'i';
+        $sql  = "UPDATE user SET " . implode(', ', $fields) . " WHERE user_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $stmt->close();
+    }
+
     header("Location: profile.php?id=$me");
     exit;
 }
@@ -73,17 +117,40 @@ $stmt->close();
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= htmlspecialchars($user['username']) ?> — Nexus</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    .profile-banner {
+      height: 200px;
+      background: <?= $user['banner_pic']
+        ? "url('" . htmlspecialchars($user['banner_pic']) . "') center/cover no-repeat"
+        : "linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%)" ?>;
+      border-radius: var(--radius) var(--radius) 0 0;
+      position: relative;
+    }
+    .pfp-img { width:72px;height:72px;border-radius:50%;object-fit:cover;border:4px solid var(--surface);box-shadow:0 0 0 3px var(--accent),0 0 0 6px var(--surface);position:relative;z-index:10; }
+    .edit-section { background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;margin-bottom:1.5rem;display:none; }
+    .edit-section h3 { font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:1rem; }
+    .upload-row { display:flex;align-items:center;gap:1rem;margin-bottom:0.8rem;flex-wrap:wrap; }
+    .upload-preview { width:60px;height:60px;border-radius:8px;object-fit:cover;border:1px solid var(--border);display:none; }
+    .banner-preview { width:120px;height:50px;border-radius:8px;object-fit:cover;border:1px solid var(--border);display:none; }
+  </style>
 </head>
 <body>
 <?php include 'includes/nav.php'; ?>
 
 <div class="container">
-  <!-- Profile Header -->
-  <div class="profile-banner"></div>
+
+  <!-- Banner -->
+  <div class="profile-banner" id="bannerDiv"></div>
+
   <div class="profile-info">
-    <div class="profile-avatar-wrap">
-      <div class="avatar avatar-lg"><?= strtoupper(substr($user['username'],0,1)) ?></div>
+    <div class="profile-avatar-wrap" style="margin-top:-36px;margin-bottom:0.8rem;position:relative;z-index:10;">
+      <?php if ($user['profile_pic']): ?>
+        <img src="<?= htmlspecialchars($user['profile_pic']) ?>" class="pfp-img" alt="Profile pic">
+      <?php else: ?>
+        <div class="avatar avatar-lg" style="box-shadow:0 0 0 3px var(--accent),0 0 0 6px var(--surface);"><?= strtoupper(substr($user['username'],0,1)) ?></div>
+      <?php endif; ?>
     </div>
+
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.8rem;">
       <div>
         <div class="profile-name"><?= htmlspecialchars($user['username']) ?></div>
@@ -95,7 +162,9 @@ $stmt->close();
         </div>
       </div>
       <div style="display:flex;gap:0.6rem;">
-        <?php if ($profile_id != $me): ?>
+        <?php if ($profile_id == $me): ?>
+          <button type="button" class="btn btn-secondary" onclick="toggleEdit()">✏️ Edit Profile</button>
+        <?php else: ?>
           <form method="POST" action="follow.php">
             <input type="hidden" name="target_id" value="<?= $profile_id ?>">
             <input type="hidden" name="redirect" value="profile.php?id=<?= $profile_id ?>">
@@ -107,17 +176,45 @@ $stmt->close();
         <?php endif; ?>
       </div>
     </div>
-
-    <?php if ($profile_id == $me): ?>
-    <!-- Edit Bio -->
-    <hr class="divider">
-    <form method="POST" style="display:flex;gap:0.6rem;align-items:center;">
-      <input type="text" name="bio" placeholder="Update your bio..." value="<?= htmlspecialchars($user['bio'] ?? '') ?>"
-        style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:0.5rem 0.9rem;color:var(--text);font-family:inherit;font-size:0.88rem;outline:none;">
-      <button type="submit" class="btn btn-primary btn-sm">Save Bio</button>
-    </form>
-    <?php endif; ?>
   </div>
+
+  <?php if ($profile_id == $me): ?>
+  <!-- Edit Profile Section -->
+  <div class="edit-section" id="editSection">
+    <h3>✏️ Edit Profile</h3>
+    <form method="POST" enctype="multipart/form-data">
+
+      <!-- Bio -->
+      <div class="form-group">
+        <label>Bio</label>
+        <input type="text" name="bio" placeholder="Write something about yourself..." value="<?= htmlspecialchars($user['bio'] ?? '') ?>">
+      </div>
+
+      <!-- Profile Picture -->
+      <div class="upload-row">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:var(--muted);margin-bottom:0.4rem;">Profile Picture</label>
+          <input type="file" name="profile_pic" accept="image/jpeg,image/png,image/gif,image/webp"
+            onchange="previewImg(this, 'pfpPrev')">
+        </div>
+        <img id="pfpPrev" class="upload-preview" alt="Preview">
+      </div>
+
+      <!-- Banner -->
+      <div class="upload-row">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:var(--muted);margin-bottom:0.4rem;">Banner Image</label>
+          <input type="file" name="banner_pic" accept="image/jpeg,image/png,image/gif,image/webp"
+            onchange="previewImg(this, 'bannerPrev'); previewBannerTop(this)">
+        </div>
+        <img id="bannerPrev" class="banner-preview" alt="Preview">
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+        <button type="button" class="btn btn-secondary" onclick="toggleEdit()">Cancel</button>
+    </form>
+  </div>
+  <?php endif; ?>
 
   <!-- Posts -->
   <?php if (empty($posts)): ?>
@@ -130,7 +227,11 @@ $stmt->close();
     <?php foreach ($posts as $p): ?>
     <div class="post-card">
       <div class="post-header">
-        <div class="avatar"><?= strtoupper(substr($user['username'],0,1)) ?></div>
+        <?php if ($user['profile_pic']): ?>
+          <img src="<?= htmlspecialchars($user['profile_pic']) ?>" class="avatar" style="object-fit:cover;" alt="">
+        <?php else: ?>
+          <div class="avatar"><?= strtoupper(substr($user['username'],0,1)) ?></div>
+        <?php endif; ?>
         <div class="post-meta">
           <span class="username"><?= htmlspecialchars($user['username']) ?></span>
           <div class="time"><?= date('M j, Y · g:i a', strtotime($p['created_at'])) ?>
@@ -150,7 +251,14 @@ $stmt->close();
       <div class="post-content"><?= nl2br(htmlspecialchars($p['content'])) ?></div>
 
       <?php if ($p['media_url']): ?>
-        <img src="<?= htmlspecialchars($p['media_url']) ?>" class="post-image" alt="Post image">
+        <?php $ext = strtolower(pathinfo($p['media_url'], PATHINFO_EXTENSION)); ?>
+        <?php if (in_array($ext, ['mp4','webm'])): ?>
+          <video controls class="post-image" style="background:#000;">
+            <source src="<?= htmlspecialchars($p['media_url']) ?>" type="video/<?= $ext ?>">
+          </video>
+        <?php else: ?>
+          <img src="<?= htmlspecialchars($p['media_url']) ?>" class="post-image" alt="Post image">
+        <?php endif; ?>
       <?php endif; ?>
 
       <div class="post-actions">
@@ -198,9 +306,28 @@ $stmt->close();
 </div>
 
 <script>
+function toggleEdit() {
+  const el = document.getElementById('editSection');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  el.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
 function toggleComments(postId) {
   const el = document.getElementById('comments-' + postId);
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function previewImg(input, previewId) {
+  if (!input.files[0]) return;
+  const img = document.getElementById(previewId);
+  img.src = URL.createObjectURL(input.files[0]);
+  img.style.display = 'block';
+}
+
+function previewBannerTop(input) {
+  if (!input.files[0]) return;
+  const url = URL.createObjectURL(input.files[0]);
+  document.getElementById('bannerDiv').style.background = `url('${url}') center/cover no-repeat`;
 }
 </script>
 </body>
