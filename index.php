@@ -183,12 +183,10 @@ $stmt->close();
             </div>
           </div>
           <?php endforeach; ?>
-          <form method="POST" action="comment.php" class="comment-form">
-            <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-            <input type="hidden" name="redirect" value="index.php">
-            <input type="text" name="content" placeholder="Write a comment..." required>
-            <button type="submit" class="btn btn-primary btn-sm">Send</button>
-          </form>
+          <div class="comment-form">
+            <input type="text" id="comment-input-<?= $p['post_id'] ?>" placeholder="Write a comment...">
+            <button class="btn btn-primary btn-sm" onclick="submitComment(<?= $p['post_id'] ?>)">Send</button>
+          </div>
         </div>
       </div>
       <?php endforeach; ?>
@@ -252,6 +250,51 @@ function toggleLike(postId, btn) {
     count.textContent = data.like_count;
   })
   .catch(err => console.error('Like error:', err));
+}
+
+function submitComment(postId) {
+  const input   = document.getElementById('comment-input-' + postId);
+  const content = input.value.trim();
+  if (!content) return;
+
+  const fd = new FormData();
+  fd.append('post_id', postId);
+  fd.append('content', content);
+
+  fetch('comment.php', {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    body: fd
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      // Append new comment to the list
+      const section = document.getElementById('comments-' + postId);
+      const div = document.createElement('div');
+      div.className = 'comment';
+      div.innerHTML = `
+        <a href="profile.php?id=${data.user_id}" class="avatar">${data.username.charAt(0).toUpperCase()}</a>
+        <div class="comment-body">
+          <span class="username">${data.username}</span>
+          <p>${data.content.replace(/\n/g, '<br>')}</p>
+        </div>`;
+      // Insert before the comment-form div
+      section.insertBefore(div, section.querySelector('.comment-form'));
+      input.value = '';
+
+      // Update comment count
+      const countBtn = section.previousElementSibling.querySelector('.action-btn:last-child');
+      if (countBtn) {
+        const match = countBtn.textContent.match(/\d+/);
+        if (match) {
+          const newCount = parseInt(match[0]) + 1;
+          countBtn.innerHTML = countBtn.innerHTML.replace(/\d+ Comments/, newCount + ' Comments');
+        }
+      }
+    }
+  })
+  .catch(err => console.error('Comment error:', err));
 }
 
 function toggleComments(postId) {
