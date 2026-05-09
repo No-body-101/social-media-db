@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
 // Fetch posts from followed users + own posts
 $sql = "
     SELECT p.post_id, p.content, p.media_url, p.visibility, p.created_at,
-           u.user_id, u.username,
+           u.user_id, u.username, u.profile_pic,
            (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.post_id) AS like_count,
            (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.post_id AND l.user_id = ?) AS user_liked,
            (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.post_id) AS comment_count
@@ -60,7 +60,7 @@ $stmt->close();
 
 // Suggested users
 $sugg_sql = "
-    SELECT u.user_id, u.username
+    SELECT u.user_id, u.username, u.profile_pic
     FROM user u
     WHERE u.user_id != ?
       AND u.is_deleted = FALSE
@@ -123,7 +123,11 @@ $stmt->close();
       <?php foreach ($posts as $p): ?>
       <div class="post-card">
         <div class="post-header">
-          <a href="profile.php?id=<?= $p['user_id'] ?>" class="avatar"><?= strtoupper(substr($p['username'], 0, 1)) ?></a>
+          <?php if ($p['profile_pic']): ?>
+            <a href="profile.php?id=<?= $p['user_id'] ?>"><img src="<?= htmlspecialchars($p['profile_pic']) ?>" class="avatar" style="object-fit:cover;" alt=""></a>
+          <?php else: ?>
+            <a href="profile.php?id=<?= $p['user_id'] ?>" class="avatar"><?= strtoupper(substr($p['username'], 0, 1)) ?></a>
+          <?php endif; ?>
           <div class="post-meta">
             <a href="profile.php?id=<?= $p['user_id'] ?>" class="username"><?= htmlspecialchars($p['username']) ?></a>
             <div class="time"><?= date('M j, Y · g:i a', strtotime($p['created_at'])) ?>
@@ -197,7 +201,19 @@ $stmt->close();
   <aside class="sidebar">
     <div class="sidebar-card">
       <div style="display:flex;align-items:center;gap:0.8rem;">
-        <a href="profile.php?id=<?= $me ?>" class="avatar"><?= strtoupper(substr($_SESSION['username'],0,1)) ?></a>
+        <?php
+          $mystmt = $conn->prepare("SELECT profile_pic FROM user WHERE user_id = ?");
+          $mystmt->bind_param("i", $me);
+          $mystmt->execute();
+          $mystmt->bind_result($my_pic);
+          $mystmt->fetch();
+          $mystmt->close();
+        ?>
+        <?php if ($my_pic): ?>
+          <a href="profile.php?id=<?= $me ?>"><img src="<?= htmlspecialchars($my_pic) ?>" class="avatar" style="object-fit:cover;" alt=""></a>
+        <?php else: ?>
+          <a href="profile.php?id=<?= $me ?>" class="avatar"><?= strtoupper(substr($_SESSION['username'],0,1)) ?></a>
+        <?php endif; ?>
         <div>
           <div style="font-weight:600;"><?= htmlspecialchars($_SESSION['username']) ?></div>
           <a href="profile.php?id=<?= $me ?>" style="font-size:0.8rem;color:var(--accent);text-decoration:none;">View Profile</a>
@@ -210,7 +226,11 @@ $stmt->close();
       <h3>People to follow</h3>
       <?php foreach ($suggestions as $s): ?>
       <div class="suggest-user">
-        <a href="profile.php?id=<?= $s['user_id'] ?>" class="avatar"><?= strtoupper(substr($s['username'],0,1)) ?></a>
+        <?php if (!empty($s['profile_pic'])): ?>
+          <a href="profile.php?id=<?= $s['user_id'] ?>"><img src="<?= htmlspecialchars($s['profile_pic']) ?>" class="avatar" style="object-fit:cover;" alt=""></a>
+        <?php else: ?>
+          <a href="profile.php?id=<?= $s['user_id'] ?>" class="avatar"><?= strtoupper(substr($s['username'],0,1)) ?></a>
+        <?php endif; ?>
         <div class="info">
           <a href="profile.php?id=<?= $s['user_id'] ?>" class="name"><?= htmlspecialchars($s['username']) ?></a>
         </div>
