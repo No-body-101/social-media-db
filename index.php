@@ -3,18 +3,18 @@ session_start();
 require 'db.php';
 if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
 $me = $_SESSION['user_id'];
- 
+
 // Handle new post submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
     $content    = trim($_POST['content']);
     $visibility = $_POST['visibility'] ?? 'public';
     $media_url  = '';
- 
+
     if (!empty($_FILES['media']['name']) && $_FILES['media']['error'] === UPLOAD_ERR_OK) {
         $ext     = strtolower(pathinfo($_FILES['media']['name'], PATHINFO_EXTENSION));
         $allowed = ['jpg','jpeg','png','gif','webp','mp4','webm'];
         $maxSize = 50 * 1024 * 1024; // 50MB
- 
+
         if (in_array($ext, $allowed) && $_FILES['media']['size'] <= $maxSize) {
             $prefix    = in_array($ext, ['mp4','webm']) ? 'vid_' : 'img_';
             $filename  = uniqid($prefix) . '.' . $ext;
@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
             }
         }
     }
- 
+
     if ($content) {
         $stmt = $conn->prepare("INSERT INTO posts (user_id, content, visibility, media_url) VALUES (?, ?, ?, ?)");
         $stmt->bind_param("isss", $me, $content, $visibility, $media_url);
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
     header("Location: index.php");
     exit;
 }
- 
+
 // Fetch posts from followed users + own posts
 $sql = "
     SELECT p.post_id, p.content, p.media_url, p.visibility, p.created_at,
@@ -57,7 +57,7 @@ $stmt->bind_param("iiii", $me, $me, $me, $me);
 $stmt->execute();
 $posts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
- 
+
 // Suggested users
 $sugg_sql = "
     SELECT u.user_id, u.username
@@ -84,20 +84,20 @@ $stmt->close();
 </head>
 <body>
 <?php include 'includes/nav.php'; ?>
- 
+
 <div class="feed-layout">
   <main>
     <!-- Create Post -->
     <div class="create-post">
       <form method="POST" enctype="multipart/form-data">
         <textarea name="content" placeholder="What's on your mind, <?= htmlspecialchars($_SESSION['username']) ?>?" required></textarea>
- 
+
         <div id="mediaPreview" style="display:none;margin:0.6rem 0;">
           <img id="previewImg" src="" style="max-width:100%;max-height:200px;border-radius:9px;object-fit:cover;" alt="Preview">
           <video id="previewVid" src="" controls style="max-width:100%;max-height:200px;border-radius:9px;display:none;"></video>
           <div id="fileName" style="font-size:0.8rem;color:var(--muted);margin-top:0.3rem;"></div>
         </div>
- 
+
         <div class="create-post-actions">
           <label for="mediaInput" style="cursor:pointer;color:var(--muted);font-size:0.88rem;padding:0.35rem 0.7rem;border-radius:8px;border:1px solid var(--border);background:var(--surface2);">
             📷 Photo / Video
@@ -111,7 +111,7 @@ $stmt->close();
         </div>
       </form>
     </div>
- 
+
     <!-- Posts -->
     <?php if (empty($posts)): ?>
       <div class="empty">
@@ -139,9 +139,9 @@ $stmt->close();
             </form>
           <?php endif; ?>
         </div>
- 
+
         <div class="post-content"><?= nl2br(htmlspecialchars($p['content'])) ?></div>
- 
+
         <?php if ($p['media_url']): ?>
           <?php $ext = strtolower(pathinfo($p['media_url'], PATHINFO_EXTENSION)); ?>
           <?php if (in_array($ext, ['mp4','webm'])): ?>
@@ -152,22 +152,20 @@ $stmt->close();
             <img src="<?= htmlspecialchars($p['media_url']) ?>" class="post-image" alt="Post image">
           <?php endif; ?>
         <?php endif; ?>
- 
+
         <div class="post-actions">
-          <form method="POST" action="like.php" style="margin:0;">
-            <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-            <input type="hidden" name="redirect" value="index.php">
-            <button type="submit" class="action-btn <?= $p['user_liked'] ? 'liked' : '' ?>">
-              <svg viewBox="0 0 24 24" fill="<?= $p['user_liked'] ? 'currentColor' : 'none' ?>" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-              <?= $p['like_count'] ?> Likes
-            </button>
-          </form>
+          <button class="action-btn <?= $p['user_liked'] ? 'liked' : '' ?>"
+            id="like-btn-<?= $p['post_id'] ?>"
+            onclick="toggleLike(<?= $p['post_id'] ?>, this)">
+            <svg id="like-svg-<?= $p['post_id'] ?>" viewBox="0 0 24 24" fill="<?= $p['user_liked'] ? 'currentColor' : 'none' ?>" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+            <span id="like-count-<?= $p['post_id'] ?>"><?= $p['like_count'] ?></span> Likes
+          </button>
           <button class="action-btn" onclick="toggleComments(<?= $p['post_id'] ?>)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
             <?= $p['comment_count'] ?> Comments
           </button>
         </div>
- 
+
         <div class="comments-section" id="comments-<?= $p['post_id'] ?>" style="display:none;">
           <?php
             $cstmt = $conn->prepare("SELECT c.content, c.created_at, u.username, u.user_id FROM comments c JOIN user u ON c.user_id = u.user_id WHERE c.post_id = ? ORDER BY c.created_at ASC LIMIT 20");
@@ -196,7 +194,7 @@ $stmt->close();
       <?php endforeach; ?>
     <?php endif; ?>
   </main>
- 
+
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-card">
@@ -208,7 +206,7 @@ $stmt->close();
         </div>
       </div>
     </div>
- 
+
     <?php if (!empty($suggestions)): ?>
     <div class="sidebar-card">
       <h3>People to follow</h3>
@@ -229,13 +227,38 @@ $stmt->close();
     <?php endif; ?>
   </aside>
 </div>
- 
+
 <script>
+function toggleLike(postId, btn) {
+  const fd = new FormData();
+  fd.append('post_id', postId);
+
+  fetch('like.php', {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    body: fd
+  })
+  .then(r => r.json())
+  .then(data => {
+    const svg   = document.getElementById('like-svg-' + postId);
+    const count = document.getElementById('like-count-' + postId);
+    if (data.liked) {
+      btn.classList.add('liked');
+      svg.setAttribute('fill', 'currentColor');
+    } else {
+      btn.classList.remove('liked');
+      svg.setAttribute('fill', 'none');
+    }
+    count.textContent = data.like_count;
+  })
+  .catch(err => console.error('Like error:', err));
+}
+
 function toggleComments(postId) {
   const el = document.getElementById('comments-' + postId);
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
- 
+
 function previewMedia(input) {
   const file = input.files[0];
   if (!file) return;
@@ -244,10 +267,10 @@ function previewMedia(input) {
   const vid     = document.getElementById('previewVid');
   const nameDiv = document.getElementById('fileName');
   const url     = URL.createObjectURL(file);
- 
+
   preview.style.display = 'block';
   nameDiv.textContent   = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
- 
+
   if (file.type.startsWith('video/')) {
     img.style.display = 'none';
     vid.style.display = 'block';
