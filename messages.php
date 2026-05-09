@@ -88,7 +88,7 @@ $stmt->close();
     .msg-bubble { max-width:65%; padding:0.6rem 0.9rem; border-radius:12px; font-size:0.9rem; line-height:1.5; }
     .msg-bubble.mine { background:var(--accent); color:#fff; align-self:flex-end; border-bottom-right-radius:3px; }
     .msg-bubble.theirs { background:var(--surface2); color:var(--text); align-self:flex-start; border-bottom-left-radius:3px; }
-    .msg-time { font-size:0.7rem; opacity:0.6; margin-top:0.2rem; }
+    .msg-time { font-size:0.72rem; opacity:0.7; margin-top:0.3rem; margin-bottom:0.5rem; }
     .chat-input { display:flex; gap:0.6rem; padding:0.8rem 1rem; border-top:1px solid var(--border); }
     .chat-input input { flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:9px; padding:0.6rem 1rem; color:var(--text); font-family:inherit; font-size:0.9rem; outline:none; }
     .chat-input input:focus { border-color:var(--accent); }
@@ -132,7 +132,7 @@ $stmt->close();
           <div class="msg-bubble <?= $m['sender_id']==$me ? 'mine' : 'theirs' ?>">
             <?= nl2br(htmlspecialchars($m['content'])) ?>
           </div>
-          <div class="msg-time" style="<?= $m['sender_id']==$me ? 'text-align:right' : '' ?>"><?= date('g:i a', strtotime($m['sent_at'])) ?></div>
+          <div class="msg-time" style="<?= $m['sender_id']==$me ? 'text-align:right' : '' ?>"><?= date('M j, g:i a', strtotime($m['sent_at'])) ?></div>
         </div>
         <?php endforeach; ?>
       </div>
